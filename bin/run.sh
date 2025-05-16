@@ -4,7 +4,7 @@ BASE_DIR=$(dirname $(readlink -e $0))/..
 
 LOG_LEVEL=info
 
-MAIN_JAR=target/telebot-0.0.1.jar
+MAIN_JAR=target/telebot-0.0.1-SNAPSHOT.jar
 
 echo $BASE_DIR
 

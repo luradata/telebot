@@ -20,6 +20,8 @@ import com.luradata.telebot.util.HttpCaller;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 @Slf4j
@@ -29,7 +31,9 @@ public class TelegramBotServiceImpl implements TelegramBotService {
     private final String ollamaModel;
     private static final String COMMAND_PREFIX = "/";
     private static final String OLLAMA_URL = "http://ollama:11434/api/generate";
-
+    
+    // Map to track processing status for each user
+    private final Map<Long, CompletableFuture<Void>> userProcessingStatus = new ConcurrentHashMap<>();
 
     public TelegramBotServiceImpl(@Qualifier("telegramBotProperties") TelegramBotProperties telegramBotProperties,
     @Value("${llm.model.name}") String ollamaModelName) {
@@ -114,16 +118,16 @@ public class TelegramBotServiceImpl implements TelegramBotService {
         switch (commandName) {
             case "start":
                 sendMessage(chatId,
-                        String.format("Welcome %s! I'm your Telegram bot assistant. How can I help you today?",
+                        String.format("Xin chào %s! Tôi là trợ lý Telegram của bạn. Tôi có thể giúp gì cho bạn hôm nay?",
                                 user.getFirstName()),
                         ParseMode.MARKDOWN);
                 break;
             case "help":
                 sendMessage(chatId,
-                        "Available commands:\n" +
-                                "/start - Start the bot\n" +
-                                "/help - Show this help message\n" +
-                                "/echo <message> - Echo back your message",
+                        "Các lệnh có sẵn:\n" +
+                                "/start - Bắt đầu sử dụng bot\n" +
+                                "/help - Hiển thị thông tin trợ giúp\n" +
+                                "/echo <tin nhắn> - Lặp lại tin nhắn của bạn",
                         ParseMode.MARKDOWN);
                 break;
             case "echo":
@@ -131,15 +135,23 @@ public class TelegramBotServiceImpl implements TelegramBotService {
                     String echoMessage = command.substring(6); // Remove "/echo "
                     sendMessage(chatId, echoMessage, ParseMode.MARKDOWN);
                 } else {
-                    sendMessage(chatId, "Please provide a message to echo", ParseMode.MARKDOWN);
+                    sendMessage(chatId, "Vui lòng nhập tin nhắn để lặp lại", ParseMode.MARKDOWN);
                 }
                 break;
             default:
-                sendMessage(chatId, "Unknown command. Type /help for available commands.", ParseMode.MARKDOWN);
+                sendMessage(chatId, "Lệnh không hợp lệ. Gõ /help để xem các lệnh có sẵn.", ParseMode.MARKDOWN);
         }
     }
 
     private void handleTextMessage(String chatId, String messageText, User user) {
+        Long userId = user.getId();
+        
+        // Check if user has an ongoing request
+        if (userProcessingStatus.containsKey(userId)) {
+            sendMessage(chatId, "Bạn đang có một yêu cầu đang được xử lý. Vui lòng đợi cho đến khi yêu cầu trước đó hoàn thành.", ParseMode.MARKDOWN);
+            return;
+        }
+
         HttpCaller httpCaller = new HttpCaller();
         
         // Create request body for Ollama API
@@ -157,30 +169,43 @@ public class TelegramBotServiceImpl implements TelegramBotService {
             .body(requestBody)
             .build();
 
+        // Create a CompletableFuture to track this request
+        CompletableFuture<Void> processingFuture = new CompletableFuture<>();
+        userProcessingStatus.put(userId, processingFuture);
+
         // Make API call and handle response
         httpCaller.callApi(config, OllamaResponse.class)
             .thenAccept(response -> {
-                if (response != null && response.getResponse() != null) {
-                    sendMessage(chatId, response.getResponse(), ParseMode.MARKDOWN);
-                } else {
-                    sendMessage(chatId, "Sorry, I couldn't process your request.", ParseMode.MARKDOWN);
+                try {
+                    if (response != null && response.getResponse() != null) {
+                        sendMessage(chatId, response.getResponse(), ParseMode.MARKDOWN);
+                    } else {
+                        sendMessage(chatId, "Xin lỗi, tôi không thể xử lý yêu cầu của bạn.", ParseMode.MARKDOWN);
+                    }
+                } finally {
+                    // Remove the processing status and complete the future
+                    userProcessingStatus.remove(userId);
+                    processingFuture.complete(null);
                 }
             })
             .exceptionally(ex -> {
                 log.error("Error calling Ollama API", ex);
-                sendMessage(chatId, "Sorry, there was an error processing your request.", ParseMode.MARKDOWN);
+                sendMessage(chatId, "Xin lỗi, đã có lỗi xảy ra khi xử lý yêu cầu của bạn.", ParseMode.MARKDOWN);
+                // Remove the processing status and complete the future
+                userProcessingStatus.remove(userId);
+                processingFuture.completeExceptionally(ex);
                 return null;
             });
     }
 
     private void handlePhotoMessage(String chatId, Message message, User user) {
-        String response = String.format("Hi %s! I received your photo. Thanks for sharing!",
+        String response = String.format("Xin chào %s! Tôi đã nhận được ảnh của bạn. Cảm ơn bạn đã chia sẻ!",
                 user.getFirstName());
         sendMessage(chatId, response, ParseMode.MARKDOWN);
     }
 
     private void handleDocumentMessage(String chatId, Message message, User user) {
-        String response = String.format("Hi %s! I received your document: %s",
+        String response = String.format("Xin chào %s! Tôi đã nhận được tài liệu của bạn: %s",
                 user.getFirstName(), message.getDocument().getFileName());
         sendMessage(chatId, response, ParseMode.MARKDOWN);
     }
