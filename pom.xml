@@ -9,7 +9,7 @@
 		<version>3.4.5</version>
 		<relativePath /> <!-- lookup parent from repository -->
 	</parent>
-	<groupId>com.haiphamcoder</groupId>
+	<groupId>com.luradata</groupId>
 	<artifactId>telebot</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name>telebot</name>
